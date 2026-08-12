@@ -444,7 +444,7 @@
   /* ---------------- 会员 ---------------- */
   function member(id) { return S.members.filter(function (m) { return m.id === id; })[0] || null; }
   function user(id) { return member(id); }
-  function userByUid(uid) { return S.members.filter(function (m) { return m.uid === uid || m.phone === uid; })[0] || null; }
+  function userByUid(uid) { return S.members.filter(function (m) { return m.uid === uid || m.id === uid || m.phone === uid; })[0] || null; }
   function members() { return S.members; }
   function activeMembers() { return S.members.filter(function (m) { return m.status !== 'disabled'; }); }
   function disabledCount() { return S.members.filter(function (m) { return m.status === 'disabled'; }).length; }
@@ -1137,6 +1137,22 @@
     addReg: function (row) {
       return this._req(this._url('/api/registrations'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ row: row }) })
         .then(function (r) { return r.json(); }).catch(function () { return { ok: false }; });
+    },
+    memberPassword: function (body) {
+      if (!AUTH_TOKEN) return Promise.resolve({ ok: false, msg: '未登录' });
+      return this._req(this._url('/api/member/password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
+        body: JSON.stringify(body)
+      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; });
+    },
+    upsertMember: function (rec) {
+      if (!AUTH_TOKEN) return Promise.resolve({ ok: false });
+      return this._req(this._url('/api/members'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH_TOKEN },
+        body: JSON.stringify({ member: rec })
+      }).then(function (r) { return r.json(); }).catch(function () { return { ok: false }; });
     }
   };
 
@@ -1207,6 +1223,9 @@
     member: member, user: user, userByUid: userByUid, members: members, activeMembers: activeMembers,
     disabledCount: disabledCount, referrerOf: referrerOf, subordinates: subordinates, scopeMembers: scopeMembers,
     setMemberStatus: setMemberStatus, importMembers: importMembers,
+    changeMyPassword: function (oldPwd, newPwd) { return API.memberPassword({ oldPwd: oldPwd, newPwd: newPwd }); },
+    adminSetMemberPassword: function (uid, newPwd) { return API.memberPassword({ uid: uid, newPwd: newPwd }); },
+    addMemberAccount: function (m) { return API.upsertMember(m); },
     updateProfile: updateProfile, profileStat: profileStat, publicMembers: publicMembers,
     learnRec: learnRec, setProgress: setProgress, learnSummary: learnSummary,
     studySession: studySession, examAttempt: examAttempt, courseStats: courseStats, leadStats: leadStats,

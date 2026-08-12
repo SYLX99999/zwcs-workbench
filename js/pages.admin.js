@@ -332,7 +332,34 @@
       },
       footer: [
         { text: '编辑资料', cls: 'ghost', onClick: function (api) { api.close(); editMemberInfo(m); } },
-        { text: '考核评价', cls: 'pri', onClick: function (api) { api.close(); evalMember(m); } }
+        { text: '考核评价', cls: 'pri', onClick: function (api) { api.close(); evalMember(m); } },
+        { text: '设置密码', cls: 'ghost', onClick: function (api) { api.close(); setMemberPwd(m); } }
+      ]
+    });
+  }
+
+  // 后台设置/重置会员登录密码（写后端，多端共享）
+  function setMemberPwd(m) {
+    var np = UI.input({ type: 'password', placeholder: '新密码（至少 6 位）' });
+    var np2 = UI.input({ type: 'password', placeholder: '确认新密码' });
+    UI.sheet({
+      title: '设置登录密码 · ' + m.name,
+      build: function (bd) {
+        bd.appendChild(UI.h('div', { class: 'notice-bar', html: I('info', 14) + ' 设置后会员请用新密码登录（默认 888888）。' }));
+        bd.appendChild(UI.field('新密码', np));
+        bd.appendChild(UI.field('确认新密码', np2));
+      },
+      footer: [
+        { text: '取消', cls: 'ghost', onClick: function (api) { api.close(); } },
+        { text: '保存', cls: 'pri', onClick: function (api) {
+          var v = np.value;
+          if (v.length < 6) { UI.toast('新密码至少 6 位', 'error'); return; }
+          if (v !== np2.value) { UI.toast('两次输入不一致', 'error'); return; }
+          DB.adminSetMemberPassword(m.uid, v).then(function (r) {
+            if (r && r.ok) { UI.toast('已设置 ' + m.name + ' 的密码'); api.close(); }
+            else UI.toast((r && r.msg) || '设置失败', 'error');
+          });
+        } }
       ]
     });
   }
@@ -426,12 +453,15 @@
       },
       footer: [{ text: '保存', cls: 'pri', onClick: function (api) {
         if (!name.value || !uid.value) { UI.toast('请填写姓名与平台ID', 'error'); return; }
-        DB.S.members.push({ id: 'm_' + uid.value, uid: uid.value, name: name.value, phone: phone.value, level: lv.value,
+        var nm = { id: 'm_' + uid.value, uid: uid.value, name: name.value, phone: phone.value, level: lv.value,
           role: (lv.value === '城市财税赋能中心' || lv.value === '城市财税赋能中心主理人') ? 'org' : 'member',
           refId: ref.value, refName: '', refPhone: '', subs: 0, commission: 0, paid: 0, blacklist: false, status: 'normal', password: '888888', region: '', joinedAt: DB.dstr(new Date()), orgId: '', companyId: '',
-          wechat: wechat.value, idCard: idCard.value, bank: bank.value, bankName: bankName.value, remark: '' });
+          wechat: wechat.value, idCard: idCard.value, bank: bank.value, bankName: bankName.value, remark: '' };
+        DB.S.members.push(nm);
         DB.log('新增会员', name.value + '(' + uid.value + ') 级别 ' + lv.value);
-        DB.save(); UI.toast('已新增会员'); App.go('admin-members');
+        DB.save();
+        DB.addMemberAccount(nm);   // 同步到后端，使其可登录
+        UI.toast('已新增会员'); App.go('admin-members');
       } }]
     });
   }

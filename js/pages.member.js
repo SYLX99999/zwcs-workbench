@@ -182,6 +182,9 @@
     ])));
 
     b.appendChild(UI.h('div', { class: 'mt16' }));
+    b.appendChild(UI.sec('账号安全'));
+    b.appendChild(UI.btn('修改登录密码', 'ghost block', function () { openChangePwd(m); }));
+    b.appendChild(UI.h('div', { class: 'mt16' }));
     b.appendChild(UI.btn('保存我的资料', 'pri block', function () {
       var patch = {
         phone: f.phone.value.trim(),
@@ -211,6 +214,33 @@
     b.appendChild(UI.h('div', { class: 'mt8' }));
     b.appendChild(UI.btn('查看我在「会员风采」的展示效果', 'ghost block', function () { viewProfile(DB.member(m.id), true); }));
     b.appendChild(UI.h('div', { style: { height: '20px' } }));
+
+    // 自助修改登录密码（写后端，多端共享）
+    function openChangePwd(mm) {
+      var oldP = UI.input({ type: 'password', placeholder: '原密码' });
+      var newP = UI.input({ type: 'password', placeholder: '新密码（至少 6 位）' });
+      var newP2 = UI.input({ type: 'password', placeholder: '确认新密码' });
+      UI.sheet({
+        title: '修改登录密码',
+        build: function (bd) {
+          bd.appendChild(UI.field('原密码', oldP));
+          bd.appendChild(UI.field('新密码', newP));
+          bd.appendChild(UI.field('确认新密码', newP2));
+        },
+        footer: [
+          { text: '取消', cls: 'ghost', onClick: function (api) { api.close(); } },
+          { text: '保存', cls: 'pri', onClick: function (api) {
+            var np = newP.value, np2 = newP2.value;
+            if (np.length < 6) { UI.toast('新密码至少 6 位', 'error'); return; }
+            if (np !== np2) { UI.toast('两次输入不一致', 'error'); return; }
+            DB.changeMyPassword(oldP.value, np).then(function (r) {
+              if (r && r.ok) { UI.toast('密码已修改，下次请用新密码登录'); api.close(); }
+              else UI.toast((r && r.msg) || '修改失败', 'error');
+            });
+          } }
+        ]
+      });
+    }
     return { body: b };
   });
 

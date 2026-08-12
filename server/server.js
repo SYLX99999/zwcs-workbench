@@ -20,6 +20,8 @@ const HOST = process.env.HOST || '0.0.0.0';
 // 历史工资种子（来自前端 js/seed-salary.js，185 条 2023-2026 归档记录）
 var SEED_SALARY_ARR = [];
 try { SEED_SALARY_ARR = JSON.parse(fs.readFileSync(SALARY_SEED, 'utf8')); } catch (e) { console.error('读取 seed-salary.json 失败：', e.message); }
+var SEED_MEMBERS_ARR = [];
+try { SEED_MEMBERS_ARR = JSON.parse(fs.readFileSync(path.join(__dirname, 'seed-members.json'), 'utf8')); } catch (e) { console.error('读取 seed-members.json 失败：', e.message); }
 
 /* ---------- 初始种子（首次运行写入 data.json） ---------- */
 function seedData() {
@@ -62,7 +64,9 @@ function seedData() {
       employees: [
         { id: 'em_seed1', name: '王会计', role: '会计', phone: '13800000001', joinedAt: '2026-04-12' },
         { id: 'em_seed2', name: '赵助理', role: '行政', phone: '13800000002', joinedAt: '2026-06-12' }
-      ]
+      ],
+      // 会员认证表（uid/name/phone/role/status/password）；首运行由 seed-members.json 种入，密码默认 888888
+      members: SEED_MEMBERS_ARR
     }
   };
 }
@@ -75,9 +79,11 @@ function loadDB() {
       DB = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
       if (!DB.users) DB.users = seedData().users;
       if (!DB.tables) DB.tables = seedData().tables;
-      ['salary', 'activities', 'activityHeaders', 'registrations', 'employees'].forEach(function (k) {
+      ['salary', 'activities', 'activityHeaders', 'registrations', 'employees', 'members'].forEach(function (k) {
         if (!DB.tables[k]) DB.tables[k] = [];
       });
+      // 已存在 data.json 但缺/空 members 表时，用种子回填（保证老数据也能会员登录）
+      if (!DB.tables.members.length) { DB.tables.members = SEED_MEMBERS_ARR.slice(); saveDB(); }
       return;
     }
   } catch (e) { console.error('读取 data.json 失败，使用初始种子：', e.message); }
@@ -158,10 +164,24 @@ var server = http.createServer(async function (req, res) {
       if (u === '/api/login' && req.method === 'POST') {
         var b = await readBody(req);
         var user = DB.users.find(function (x) { return x.uid === b.uid && x.pwd === b.pwd; });
-        if (!user) { sendJSON(res, 401, { ok: false, msg: '账号或密码错误' }); return; }
-        var token = newToken();
-        sessions[token] = { uid: user.uid, role: user.role, name: user.name };
-        sendJSON(res, 200, { ok: true, token: token, role: user.role, name: user.name, uid: user.uid });
+        if (user) {
+          var token = newToken();
+          sessions[token] = { uid: user.uid, role: user.role, name: user.name };
+          sendJSON(res, 200, { ok: true, token: token, role: user.role, name: user.name, uid: user.uid });
+          return;
+        }
+        // 会员登录：支持 平台ID(uid) / 内部id(m_xxx) / 手机号 任一登录；密码默认 888888；禁用账号拒绝
+        var key = (b.uid || '').toString().trim();
+        var mem = DB.tables.members.find(function (x) {
+          return x.uid === key || x.id === key || (x.phone && x.phone === key);
+        });
+        if (!mem) { sendJSON(res, 401, { ok: false, msg: '账号不存在' }); return; }
+        if (mem.status === 'disabled') { sendJSON(res, 401, { ok: false, msg: '该账号已被禁用，请联系管理员' }); return; }
+        if (mem.password !== b.pwd) { sendJSON(res, 401, { ok: false, msg: '密码错误' }); return; }
+        var tokenM = newToken();
+        var mrole = mem.role || 'member';
+        sessions[tokenM] = { uid: mem.uid, role: mrole, name: mem.name };
+        sendJSON(res, 200, { ok: true, token: tokenM, role: mrole, name: mem.name, uid: mem.uid });
         return;
       }
 
@@ -173,7 +193,10 @@ var server = http.createServer(async function (req, res) {
         var me = auth(req);
         if (needAuth && !me) { sendJSON(res, 401, { ok: false, msg: '未登录' }); return; }
         var out = {};
-        names.forEach(function (n) { if (DB.tables[n]) out[n] = DB.tables[n]; });
+        names.forEach(function (n) {
+          if (n === 'members') return;            // 会员含密码，禁止经此通用接口返回
+          if (DB.tables[n]) out[n] = DB.tables[n];
+        });
         sendJSON(res, 200, { ok: true, tables: out, role: me ? me.role : null });
         return;
       }
@@ -185,7 +208,7 @@ var server = http.createServer(async function (req, res) {
         var body = await readBody(req);
         var tb = body.tables || {};
         Object.keys(tb).forEach(function (k) {
-          if (SHARED.indexOf(k) >= 0 && k !== 'registrations') DB.tables[k] = tb[k];
+          if (SHARED.indexOf(k) >= 0 && k !== 'registrations' && k !== 'members') DB.tables[k] = tb[k];
         });
         saveDBSoon();
         sendJSON(res, 200, { ok: true, by: me2.uid });
@@ -205,8 +228,47 @@ var server = http.createServer(async function (req, res) {
         return;
       }
 
-      sendJSON(res, 404, { ok: false, msg: '未知接口' });
-      return;
+      // 会员密码：管理员设置 / 会员自助修改（写入后端 members 表，多端共享）
+      if (u === '/api/member/password' && req.method === 'POST') {
+        var me = auth(req);
+        if (!me) { sendJSON(res, 401, { ok: false, msg: '未登录' }); return; }
+        var pb = await readBody(req);
+        var newPwd = (pb.newPwd || '').toString();
+        if (!newPwd || newPwd.length < 6) { sendJSON(res, 400, { ok: false, msg: '新密码至少 6 位' }); return; }
+        if (me.role === 'admin' || me.role === 'finance') {
+          var tuid = (pb.uid || '').toString();
+          if (!tuid) { sendJSON(res, 400, { ok: false, msg: '缺少会员账号' }); return; }
+          var tm = DB.tables.members.find(function (x) { return x.uid === tuid; });
+          if (!tm) { sendJSON(res, 404, { ok: false, msg: '会员不存在' }); return; }
+          tm.password = newPwd; saveDBSoon();
+          sendJSON(res, 200, { ok: true, msg: '已设置 ' + tm.name + ' 的登录密码' });
+          return;
+        }
+        // 会员自助修改：校验原密码，且只能改自己的
+        var sm = DB.tables.members.find(function (x) { return x.uid === me.uid; });
+        if (!sm) { sendJSON(res, 404, { ok: false, msg: '会员不存在' }); return; }
+        if (sm.password !== (pb.oldPwd || '')) { sendJSON(res, 400, { ok: false, msg: '原密码错误' }); return; }
+        sm.password = newPwd; saveDBSoon();
+        sendJSON(res, 200, { ok: true, msg: '密码已修改' });
+        return;
+      }
+
+      // 管理员新增/同步会员账号到后端（使新会员也能登录）
+      if (u === '/api/members' && req.method === 'POST') {
+        var meM = auth(req);
+        if (!meM || (meM.role !== 'admin' && meM.role !== 'finance')) { sendJSON(res, 401, { ok: false, msg: '无权限' }); return; }
+        var mb = await readBody(req);
+        var rec = mb.member;
+        if (!rec || !rec.uid) { sendJSON(res, 400, { ok: false, msg: '缺少会员数据' }); return; }
+        var ex = DB.tables.members.find(function (x) { return x.uid === rec.uid; });
+        if (ex) { Object.assign(ex, rec); } else { DB.tables.members.push(rec); }
+        saveDBSoon();
+        sendJSON(res, 200, { ok: true });
+        return;
+      }
+
+        sendJSON(res, 404, { ok: false, msg: '未知接口' });
+        return;
     }
     serveStatic(req, res, req.url);
   } catch (e) {

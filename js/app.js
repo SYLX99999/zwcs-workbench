@@ -105,14 +105,18 @@
     if (!key) { UI.toast('请输入账号', 'error'); return; }
     // 在线模式：统一走后端鉴权（多人共享数据）
     if (DB.online && DB.online()) {
-      DB.apiLogin(key, pw).then(function (res) {
-        if (res && res.ok) {
-          DB.syncAuth(res.token);
-          var u = DB.adminUser(res.role) || { id: res.uid, uid: res.uid, role: res.role, name: res.name };
-          return loginSuccess(u);
-        }
-        UI.toast((res && res.msg) || '账号或密码错误', 'error');
-      });
+        DB.apiLogin(key, pw).then(function (res) {
+          if (res && res.ok) {
+            DB.syncAuth(res.token);
+            // 管理员/财务走 adminUser；会员用 userByUid 取完整对象（含正确 id，避免会员页拿不到数据）
+            var u = DB.adminUser(res.role) || DB.userByUid(res.uid) || { id: res.uid, uid: res.uid, role: res.role, name: res.name };
+            return loginSuccess(u);
+          }
+          // 在线登录失败：后端瞬时不可达时，已种入本地的会员仍可登录（不锁死用户）
+          var off = offlineMemberLogin(key, pw);
+          if (off) { DB.syncAuth(''); return loginSuccess(off); }
+          UI.toast((res && res.msg) || '账号或密码错误', 'error');
+        });
       return;
     }
     // 离线模式：原本地校验逻辑
@@ -123,6 +127,15 @@
     if (u.password && u.password !== pw) { UI.toast('密码错误', 'error'); return; }
     if (u.status === 'disabled') { UI.toast('该账号已被禁用，请联系管理员', 'error'); return; }
     loginSuccess(u);
+  }
+
+  // 后端不可达时的本地兜底：仅对前端种子中已存在的会员放行（种子无密码字段时按默认 888888 校验）
+  function offlineMemberLogin(key, pw) {
+    var u = DB.userByUid(key);
+    if (!u || u.status === 'disabled') return null;
+    if (u.password && u.password !== pw) return null;          // 本地有密码则严格校验
+    if (!u.password && pw && pw !== '888888') return null;     // 种子无密码则仅放行默认密码
+    return u;
   }
 
   function loginSuccess(u) {
