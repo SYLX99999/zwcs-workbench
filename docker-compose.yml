@@ -1,0 +1,22 @@
+# 自有服务器一键部署（Docker Compose）
+# 用法（在服务器上，进入本项目目录后执行）：
+#   docker compose up -d --build
+# 访问： http://<服务器公网IP>   （80 端口已映射到容器内 8080）
+# 数据： zwcs-data 卷持久化 /app/server（工资/报名数据重启不丢）
+# 升级： 改完代码后 git pull + docker compose up -d --build 即可
+services:
+  zwcs:
+    build: .
+    image: zwcs-workbench:latest
+    container_name: zwcs-workbench
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+    volumes:
+      - zwcs-data:/app/server
+
+volumes:
+  zwcs-data:
