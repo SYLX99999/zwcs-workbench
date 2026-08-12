@@ -1,0 +1,8 @@
+# 本地运行产生的运行时数据（部署时由种子自动重建，无需提交）
+server/data.json
+server/data.json.tmp
+node_modules
+.DS_Store
+*.log
+.workbuddy
+public-deploy

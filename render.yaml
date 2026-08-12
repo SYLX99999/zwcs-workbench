@@ -1,0 +1,17 @@
+# Render 部署配置（推荐免费方案）
+# 用法：在 Render 新建 Blueprint / Web Service，连接本机代码（Git 或手动上传 zip），
+# 选择此 render.yaml 即可一键部署。一个服务同时托管前端 + /api，同源、数据真正共享。
+services:
+  - type: web
+    name: zwcs-workbench
+    runtime: node
+    rootDir: .               # 仓库根即代码根（含 package.json 的目录）
+    plan: free
+    buildCommand: "node -v"   # 零依赖，无需安装；仅校验 Node 版本
+    startCommand: "node server/server.js"
+    healthCheckPath: /api/ping
+    envVars:
+      - key: PORT
+        value: "10000"        # Render 会注入自己的 PORT，这里只是兜底
+      - key: HOST
+        value: "0.0.0.0"
